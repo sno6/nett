@@ -132,18 +132,22 @@ func (m Matrix) T() Matrix {
 	return out
 }
 
-func Sigmoid(n float64) float64 {
+func Sigmoid(n float64, deriv bool) float64 {
+	if deriv {
+		return n * (1 - n)
+	}
 	return 1 / (1 + math.Exp(-n))
 }
 
-func SigmoidDeriv(n float64) float64 {
-	return n * (1 - n)
+func Softmax(n float64, deriv bool) float64 {
+	// TODO (sno6): Implement this goi.
+	return n
 }
 
-func DotWithSigmoid(a, b Matrix) Matrix {
+func DotWithActivation(a, b Matrix, f ActivationFunc) Matrix {
 	out := Dot(a, b)
 	out.SetForEach(func(v float64, x, y int) float64 {
-		return Sigmoid(v)
+		return f(v, false)
 	})
 	return out
 }
@@ -156,11 +160,13 @@ func NewWeightMatrix(r, c int) Matrix {
 	return m
 }
 
-func Loss(t float64, o float64) float64 {
+func EuclideanLoss(t float64, o float64, deriv bool) float64 {
+	if deriv {
+		return o - t
+	}
 	return (1.0 / 2.0) * math.Pow(t-o, 2)
 }
 
-// Pretty returns a pretty string of the matrix.
 func (m Matrix) Pretty() string {
 	var b strings.Builder
 

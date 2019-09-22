@@ -1,114 +1,175 @@
 package nett
 
-type Nett struct {
-	cfg                    *Config
-	weights, nodes, deltas []Matrix
+// A Layer...
+type Layer interface {
+	Init(p *Parameters, nextLayer Layer)
+	Forward(p *Parameters) Matrix
+	Backward(p *Parameters) Matrix
+	Size() int
 }
 
-type Config struct {
-	LearningRate                float64
-	TrainingEpochs              int
-	InputN, OutputN             int
-	HiddenLayersN, HiddenNodesN int
+type Nett struct {
+	cfg *TrainingConfig
+
+	params *Parameters
+	layers []Layer
+}
+
+type Parameters struct {
+	weights []Matrix
+	nodes   []Matrix
+	deltas  []Matrix
+
+	nLayers      int
+	currentLayer int
+	learningRate float64
+
+	// Optimal output from training set.
+	trainingOut Matrix
+}
+
+func (p *Parameters) LayerCount() int {
+	return p.nLayers
+}
+
+func (p *Parameters) CurrentLayer() int {
+	return p.currentLayer
+}
+
+func (p *Parameters) SetTrainingOutput(m Matrix) {
+	p.trainingOut = m
+}
+
+func (p *Parameters) TrainingOutput() Matrix {
+	return p.trainingOut
+}
+
+type (
+	ActivationFunc func(n float64, deriv bool) float64
+	LossFunc       func(netOut, realOut float64, deriv bool) float64
+)
+
+type TrainingConfig struct {
+	LearningRate float64
+	Epochs       int
+	Loss         LossFunc
 }
 
 type TrainingSample struct {
 	Input, Output Matrix
 }
 
-var DefaultConfig = &Config{
-	LearningRate:   0.4,
-	TrainingEpochs: 100000,
-	InputN:         2,
-	OutputN:        1,
-	HiddenLayersN:  2,
-	HiddenNodesN:   10,
+var DefaultConfig = &TrainingConfig{
+	LearningRate: 0.4,
+	Epochs:       100000,
+	Loss:         EuclideanLoss,
 }
 
-func New(cfg *Config) *Nett {
+func New(cfg *TrainingConfig, layers ...Layer) *Nett {
 	if cfg == nil {
 		cfg = DefaultConfig
 	}
 	n := &Nett{cfg: cfg}
-	n.InitWeights()
-	n.InitNodes()
-	n.InitDeltas()
+	if len(layers) > 0 {
+		n.InitModel(layers...)
+	}
 	return n
 }
 
-func (n *Nett) InitNodes() {
-	if n.nodes == nil {
-		n.nodes = make([]Matrix, n.Layers())
+func (n *Nett) InitModel(layers ...Layer) {
+	nLayers := len(layers)
+	n.layers = layers
+	n.params = &Parameters{
+		weights:      make([]Matrix, nLayers-1),
+		nodes:        make([]Matrix, nLayers),
+		deltas:       make([]Matrix, nLayers),
+		nLayers:      nLayers,
+		learningRate: n.cfg.LearningRate,
 	}
-}
-
-func (n *Nett) InitDeltas() {
-	if n.deltas == nil {
-		n.deltas = make([]Matrix, n.Layers())
+	for l := 0; l < nLayers-1; l++ {
+		// TODO (sno6): Not too sure on this currentLayer biz, may be better to send through layer index to Layer methods.
+		n.params.currentLayer = l
+		layers[l].Init(n.params, layers[l+1])
 	}
-}
-
-func (n *Nett) InitWeights() {
-	if n.weights == nil {
-		n.weights = make([]Matrix, n.Layers()-1)
-	}
-
-	// Set input & output weight dimensions.
-	inp := 0
-	out := len(n.weights) - 1
-	n.weights[inp] = NewWeightMatrix(n.cfg.InputN, n.cfg.HiddenNodesN)
-	n.weights[out] = NewWeightMatrix(n.cfg.HiddenNodesN, n.cfg.OutputN)
-
-	// Set hidden layer weights.
-	for i := inp + 1; i < out; i++ {
-		n.weights[i] = NewWeightMatrix(n.cfg.HiddenNodesN, n.cfg.HiddenNodesN)
-	}
-}
-
-func (n *Nett) Layers() int {
-	return 1 + n.cfg.HiddenLayersN + 1
+	n.params.currentLayer = 0
 }
 
 // Forward propogates an input matrix through the network.
 func (n *Nett) Forward(input Matrix) Matrix {
-	layers := n.Layers()
-	n.nodes[0] = input
-	for l := 1; l < layers; l++ {
-		n.nodes[l] = DotWithSigmoid(n.nodes[l-1], n.weights[l-1])
+	nLayers := len(n.layers)
+	n.params.nodes[0] = input
+	for l := 0; l < nLayers-1; l++ {
+		n.params.currentLayer = l
+		n.params.nodes[l+1] = n.layers[l].Forward(n.params)
 	}
-	return n.nodes[layers-1]
+	return n.params.nodes[nLayers-1]
 }
 
 // Backward performs backpropogation in order to update the weights in the network.
 func (n *Nett) Backward(om Matrix, tm Matrix) {
-	nLayers := n.Layers()
+	n.params.SetTrainingOutput(tm)
 
-	// Calculate deltas for error layer.
-	n.deltas[nLayers-1] = om.SetForEachNew(func(o float64, x, y int) float64 {
-		return SigmoidDeriv(o) * (o - tm.At(x, y))
-	})
-
-	// Calculate the deltas & adjust weights for each hidden layer.
-	for l := nLayers - 2; l >= 0; l-- {
-		n.deltas[l] = n.nodes[l].SetForEachNew(func(lOut float64, lX, lY int) float64 {
-			weights := n.weights[l].Row(lX)
-			return n.deltas[l+1].SetForEachNew(func(d float64, x, y int) float64 {
-				// Update weights in the current layer.
-				w := n.weights[l].At(x, lX)
-				n.weights[l].Set(x, lX, w-(n.cfg.LearningRate*(lOut*d)))
-
-				// Calculate new deltas for the current layer.
-				return SigmoidDeriv(lOut) * d * weights[x]
-			}).Sum()
-		})
+	for l := len(n.layers) - 1; l > 0; l-- {
+		n.params.currentLayer = l
+		n.params.deltas[l] = n.layers[l].Backward(n.params)
 	}
 }
 
-// TODO (sno6): Super simple, this could do with improving..
 func (n *Nett) Train(data []*TrainingSample) {
-	for i := 0; i < n.cfg.TrainingEpochs; i++ {
+	// TODO (sno6): Implement mini-batch.
+	for i := 0; i < n.cfg.Epochs; i++ {
 		for _, t := range data {
 			n.Backward(n.Forward(t.Input), t.Output)
 		}
 	}
+}
+
+type FullyConnected struct {
+	params *FullyConnectedParams
+}
+
+type FullyConnectedParams struct {
+	Nodes      int
+	Activation ActivationFunc
+}
+
+func NewFullyConnected(params *FullyConnectedParams) *FullyConnected {
+	return &FullyConnected{params: params}
+}
+
+func (fc *FullyConnected) Init(params *Parameters, nextLayer Layer) {
+	layer := params.CurrentLayer()
+	params.weights[layer] = NewWeightMatrix(fc.params.Nodes, nextLayer.Size())
+}
+
+func (fc *FullyConnected) Forward(params *Parameters) Matrix {
+	layer := params.CurrentLayer()
+	return DotWithActivation(params.nodes[layer], params.weights[layer], fc.params.Activation)
+}
+
+func (fc *FullyConnected) Backward(params *Parameters) Matrix {
+	currLayer := params.CurrentLayer()
+	nLayers := params.LayerCount()
+
+	// Handle the output layer deltas a little differently.
+	if currLayer == nLayers-1 {
+		return params.nodes[currLayer].SetForEachNew(func(o float64, x, y int) float64 {
+			return fc.params.Activation(o, true) * (o - params.TrainingOutput().At(x, y)) // TODO (farleyschaefer): Get this from LossFunc..
+		})
+	}
+
+	return params.nodes[currLayer].SetForEachNew(func(lOut float64, lX, lY int) float64 {
+		weights := params.weights[currLayer].Row(lX)
+		return params.deltas[currLayer+1].SetForEachNew(func(d float64, x, y int) float64 {
+			w := params.weights[currLayer].At(x, lX)
+			params.weights[currLayer].Set(x, lX, w-(params.learningRate*(lOut*d)))
+
+			// Calculate new deltas for the current layer.
+			return fc.params.Activation(lOut, true) * d * weights[x]
+		}).Sum()
+	})
+}
+
+func (fc *FullyConnected) Size() int {
+	return fc.params.Nodes
 }
