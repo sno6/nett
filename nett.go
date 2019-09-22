@@ -109,7 +109,7 @@ func (n *Nett) Forward(input Matrix) Matrix {
 func (n *Nett) Backward(om Matrix, tm Matrix) {
 	n.params.SetTrainingOutput(tm)
 
-	for l := len(n.layers) - 1; l > 0; l-- {
+	for l := len(n.layers) - 1; l >= 0; l-- {
 		n.params.currentLayer = l
 		n.params.deltas[l] = n.layers[l].Backward(n.params)
 	}
