@@ -24,7 +24,7 @@ func main() {
 	n := nett.New(&nett.TrainingConfig{
 		LearningRate: 0.4,
 		Epochs:       100000,
-		Loss:         nett.EuclideanLoss,
+		LossFunc:     nett.EuclideanLoss,
 	})
 
 	// Initialise the model layers that we want to train. Note here that input and output layers are included.

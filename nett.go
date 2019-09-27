@@ -23,6 +23,7 @@ type Parameters struct {
 	nLayers      int
 	currentLayer int
 	learningRate float64
+	lossFunc     LossFunc
 
 	// Optimal output from training set.
 	trainingOut Matrix
@@ -44,6 +45,10 @@ func (p *Parameters) TrainingOutput() Matrix {
 	return p.trainingOut
 }
 
+func (p *Parameters) LossFunc() LossFunc {
+	return p.lossFunc
+}
+
 type (
 	ActivationFunc func(n float64, deriv bool) float64
 	LossFunc       func(netOut, realOut float64, deriv bool) float64
@@ -52,7 +57,7 @@ type (
 type TrainingConfig struct {
 	LearningRate float64
 	Epochs       int
-	Loss         LossFunc
+	LossFunc     LossFunc
 }
 
 type TrainingSample struct {
@@ -62,7 +67,7 @@ type TrainingSample struct {
 var DefaultConfig = &TrainingConfig{
 	LearningRate: 0.4,
 	Epochs:       100000,
-	Loss:         EuclideanLoss,
+	LossFunc:     EuclideanLoss,
 }
 
 func New(cfg *TrainingConfig, layers ...Layer) *Nett {
@@ -84,6 +89,7 @@ func (n *Nett) InitModel(layers ...Layer) {
 		nodes:        make([]Matrix, nLayers),
 		deltas:       make([]Matrix, nLayers),
 		nLayers:      nLayers,
+		lossFunc:     n.cfg.LossFunc,
 		learningRate: n.cfg.LearningRate,
 	}
 	for l := 0; l < nLayers-1; l++ {
@@ -108,7 +114,6 @@ func (n *Nett) Forward(input Matrix) Matrix {
 // Backward performs backpropogation in order to update the weights in the network.
 func (n *Nett) Backward(om Matrix, tm Matrix) {
 	n.params.SetTrainingOutput(tm)
-
 	for l := len(n.layers) - 1; l >= 0; l-- {
 		n.params.currentLayer = l
 		n.params.deltas[l] = n.layers[l].Backward(n.params)
@@ -154,7 +159,7 @@ func (fc *FullyConnected) Backward(params *Parameters) Matrix {
 	// Handle the output layer deltas a little differently.
 	if currLayer == nLayers-1 {
 		return params.nodes[currLayer].SetForEachNew(func(o float64, x, y int) float64 {
-			return fc.params.Activation(o, true) * (o - params.TrainingOutput().At(x, y)) // TODO (farleyschaefer): Get this from LossFunc..
+			return fc.params.Activation(o, true) * params.LossFunc()(params.TrainingOutput().At(x, y), o, true)
 		})
 	}
 

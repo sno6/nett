@@ -140,8 +140,18 @@ func Sigmoid(n float64, deriv bool) float64 {
 }
 
 func Softmax(n float64, deriv bool) float64 {
-	// TODO (sno6): Implement this goi.
+	// TODO (sno6): Implement.
 	return n
+}
+
+func Relu(n float64, deriv bool) float64 {
+	if deriv {
+		if n > 0 {
+			return 1
+		}
+		return 0
+	}
+	return math.Max(0, n)
 }
 
 func DotWithActivation(a, b Matrix, f ActivationFunc) Matrix {
@@ -160,11 +170,11 @@ func NewWeightMatrix(r, c int) Matrix {
 	return m
 }
 
-func EuclideanLoss(t float64, o float64, deriv bool) float64 {
+func EuclideanLoss(t float64, p float64, deriv bool) float64 {
 	if deriv {
-		return o - t
+		return p - t
 	}
-	return (1.0 / 2.0) * math.Pow(t-o, 2)
+	return (1.0 / 2.0) * math.Pow(p-t, 2)
 }
 
 func (m Matrix) Pretty() string {
